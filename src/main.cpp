@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
-#include <SimpleKalmanFilter.h>
-//#include <EEPROM.h>
+#include <EEPROM.h>
+#include <Smoothed.h>
 
 #define BUTTON_PIN PB0
 #define LED_PIN PB1
@@ -9,9 +9,9 @@
 #define TX_PIN PB4
 
 const uint8_t gammaCorrectionTable[] = {
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
-    1,  1,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,
+    0,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
+    1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  2,  2,
+    2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,
     2,  3,  3,  3,  3,  3,  3,  3,  4,  4,  4,  4,  4,  5,  5,  5,
     5,  6,  6,  6,  6,  7,  7,  7,  7,  8,  8,  8,  9,  9,  9, 10,
    10, 10, 11, 11, 11, 12, 12, 13, 13, 13, 14, 14, 15, 15, 16, 16,
@@ -26,33 +26,48 @@ const uint8_t gammaCorrectionTable[] = {
   177,180,182,184,186,189,191,193,196,198,200,203,205,208,210,213,
   215,218,220,223,225,228,231,233,236,239,241,244,247,249,252,255 };
 
-uint8_t maxBrightness = 0;
 SoftwareSerial Monitor(-1, TX_PIN, false);
-// https://github.com/denyssene/SimpleKalmanFilter/blob/master/README.md#basic-usage
-SimpleKalmanFilter kf(1, 1, 0.1);
+Smoothed <uint8_t> mySensor; 
 
 enum Mode { STATIC, FADE, FIRE };
+const int modeAddress = 1;
+const int fadeOutTime = 10000; // 3 seconds (3000 ms) for fade-out
+const int fadeInTime = 5000;  // 1 second (1000 ms) for fade-in
 Mode currentMode = STATIC;
 bool lastButtonState = HIGH;
-const int modeAddress = 0;
-const int fadeOutTime = 3000; // 3 seconds (3000 ms) for fade-out
-const int fadeInTime = 1000;  // 1 second (1000 ms) for fade-in
-
-void loadSettings() {
-  //currentMode = static_cast<Mode>(EEPROM.read(modeAddress));
-}
+uint8_t maxBrightness = 255;
+int currentBrightness = maxBrightness / 2; // Start at mid brightness
+const int numADCSamples = 31; // Must be odd for median
+int adcSamples[numADCSamples];
+int adcValue = 0;
 
 void saveSettings() {
-  //EEPROM.write(modeAddress, currentMode);
+  EEPROM.write(modeAddress, (uint8_t)currentMode);
 }
 
-void setBrightness(){
-  for(int i=0;i<50;i++)
+void loadSettings() {
+  currentMode = static_cast<Mode>(EEPROM.read(modeAddress));
+}
+
+void updateMaxBrightness(){
+  // Take a series of readings
+  for(int i=0;i<numADCSamples;i++)
   {
-    int adc_value = ((analogRead(ADC_PIN)+analogRead(ADC_PIN)+analogRead(ADC_PIN)+analogRead(ADC_PIN)+analogRead(ADC_PIN))/5);
-    int adc_fvalue = ((int)kf.updateEstimate(adc_value))>>2;
-    maxBrightness = gammaCorrectionTable[adc_fvalue];
+    adcSamples[i] = analogRead(ADC_PIN);
   }
+   // Sort the array (simple bubble sort)
+  for (int i = 0; i < numADCSamples - 1; i++) {
+    for (int j = 0; j < numADCSamples - i - 1; j++) {
+      if (adcSamples[j] > adcSamples[j + 1]) {
+        int temp = adcSamples[j];
+        adcSamples[j] = adcSamples[j + 1];
+        adcSamples[j + 1] = temp;
+      }
+    }
+  }
+  // The median value
+  adcValue = adcSamples[numADCSamples / 2];
+  maxBrightness = map(adcValue, 0, 1023, 5, 255);
 }
 
 void debug(){
@@ -60,6 +75,8 @@ void debug(){
   Monitor.print(": ");
   Monitor.print("MODE: ");
   Monitor.print(currentMode);
+  Monitor.print(". ADC: ");
+  Monitor.print(adcValue);
   Monitor.print(". Brightness: ");
   Monitor.print(maxBrightness);
   Monitor.println();
@@ -75,71 +92,79 @@ void blinkLED(int times, int delayTime) {
 }
 
 void setup() {
+  delay(1000);
+
+  mySensor.begin(SMOOTHED_EXPONENTIAL, 10);	
+
+  Monitor.begin(9600);
+  Monitor.println("LED Control V1.0");
+
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(ADC_PIN, INPUT_PULLUP); //adc
   pinMode(LED_PIN, OUTPUT);   // led
   pinMode(TX_PIN, OUTPUT);   // Tx
   
-  //loadSettings();
-  Monitor.begin(9600);
-  delay(500);
+  loadSettings();
+  updateMaxBrightness();
+  blinkLED(5, 100);
   debug();
-  blinkLED(1+currentMode, 200);
-  Monitor.println("LED Control V1.0");
-
-  setBrightness();
-  analogWrite(LED_PIN, maxBrightness);
 }
 
 void loop() {
+  updateMaxBrightness();
+  debug();
+  analogWrite(LED_PIN, maxBrightness);
+  // bool buttonState = digitalRead(BUTTON_PIN);
 
-    bool buttonState = digitalRead(BUTTON_PIN);
+  // // Check for button release
+  // if (lastButtonState == LOW && buttonState == HIGH) {
+  //   // Switch mode on button release
+  //   currentMode = static_cast<Mode>((currentMode + 1) % 3); // Cycle through modes
+  //   debug();
+  //   saveSettings();
+  //   blinkLED(1+currentMode, 200);
+  //   delay(500);
+  // }
+  // lastButtonState = buttonState;
 
-    // Check for button release
-    if (lastButtonState == LOW && buttonState == HIGH) {
-      // Switch mode on button release
-      currentMode = static_cast<Mode>((currentMode + 1) % 3); // Cycle through modes
-      debug();
-      //saveSettings();
-      blinkLED(1+currentMode, 200);
-    }
-    lastButtonState = buttonState;
+  // if (currentMode == STATIC) {
+  //   setMaxBrightness();
+  //   // Static mode: Set LED to maximum brightness
+  //   analogWrite(LED_PIN, maxBrightness);
+  // } 
+  // else if (currentMode == FIRE) {
+  //   // Fire animation: smooth flickering effect
+  //   static int currentBrightness = maxBrightness / 2; // Start at mid brightness
+  //   for (int i = 0; i < 50; i++) { // Adjust the loop count for duration of the effect
+  //     if (digitalRead(BUTTON_PIN) == LOW && lastButtonState == HIGH) break; // Exit if mode changes
+      
+  //     int targetBrightness = random(maxBrightness / 2, maxBrightness); // Random target brightness
+  //     int step = (targetBrightness - currentBrightness) / 10; // Smooth transition steps
 
-    if (currentMode == STATIC) {
-      // Static mode: Set LED to maximum brightness
-      analogWrite(LED_PIN, maxBrightness);
-      Monitor.print(millis());
-      Monitor.println(" Ping");
-      delay(1000);
-    } 
-    else if (currentMode == FIRE) {
-      // Fire animation: smooth flickering effect
-      static int currentBrightness = maxBrightness / 2; // Start at mid brightness
-
-      for (int i = 0; i < 50; i++) { // Adjust the loop count for duration of the effect
-        if (digitalRead(BUTTON_PIN) == LOW && lastButtonState == HIGH) break; // Exit if mode changes
-        int targetBrightness = random(maxBrightness / 2, maxBrightness); // Random target brightness
-        int step = (targetBrightness - currentBrightness) / 10; // Smooth transition steps
-
-        for (int j = 0; j < 10; j++) { // Gradually change brightness
-          if (digitalRead(BUTTON_PIN) == LOW && lastButtonState == HIGH) break; // Exit if mode changes
-          currentBrightness += step;
-          analogWrite(LED_PIN, constrain(currentBrightness, 0, maxBrightness)); // Ensure brightness is within bounds
-          delay(15); // Smooth transition delay
-        }
-      }
-    }
-    else if (currentMode == FADE) {
-      // Fade animation
-      for (int brightness = 0; brightness <= maxBrightness; brightness++) {
-        if (digitalRead(BUTTON_PIN) == LOW && lastButtonState == HIGH) break; // Exit if mode changes
-        analogWrite(LED_PIN, brightness);
-        delay(10);
-      }
-      for (int brightness = maxBrightness; brightness >= 0; brightness--) {
-        if (digitalRead(BUTTON_PIN) == LOW && lastButtonState == HIGH) break; // Exit if mode changes
-        analogWrite(LED_PIN, brightness);
-        delay(10);
-      }
-    }
+  //     for (int j = 0; j < 10; j++) { // Gradually change brightness
+  //       setMaxBrightness();
+  //       if (digitalRead(BUTTON_PIN) == LOW && lastButtonState == HIGH) break; // Exit if mode changes
+  //       currentBrightness += step;
+  //       int br =  gammaCorrectionTable[constrain(currentBrightness, 0, maxBrightness)];
+  //       if (br<32) br = 32;
+  //       analogWrite(LED_PIN, br); // Ensure brightness is within bounds
+  //       delay(30); // Smooth transition delay
+  //     }
+  //   }
+  // }
+  // else if (currentMode == FADE) {
+  //   // Fade animation
+  //   for (int brightness = 0; brightness <= maxBrightness; brightness++) {
+  //     setMaxBrightness();
+  //     if (digitalRead(BUTTON_PIN) == LOW && lastButtonState == HIGH) break; // Exit if mode changes
+  //     analogWrite(LED_PIN, gammaCorrectionTable[brightness]);
+  //     delay(fadeInTime / maxBrightness);
+  //   }
+  //   for (int brightness = maxBrightness; brightness >= 0; brightness--) {
+  //     setMaxBrightness();
+  //     if (digitalRead(BUTTON_PIN) == LOW && lastButtonState == HIGH) break; // Exit if mode changes
+  //     analogWrite(LED_PIN, gammaCorrectionTable[brightness]);
+  //     delay(fadeOutTime / maxBrightness);
+  //   }
+  // }
 }
