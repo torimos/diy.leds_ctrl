@@ -10,7 +10,7 @@
 #define TX_PIN PB4
 
 // Modes
-enum Mode { MODE_STATIC, MODE_RANDOM_FADE, MODE_NEON_FLICKER, MODE_FIRE_FLICKER };
+enum Mode { MODE_STATIC, MODE_SCHEDULED, MODE_RANDOM_FADE, MODE_NEON_FLICKER, MODE_FIRE_FLICKER };
 enum BrightnessMode { BR_MODE_INC, BR_MODE_DEC };
 // Globals
 const int brAddress = 0;
@@ -28,6 +28,7 @@ OneButton button(BUTTON_PIN, true);
 // Function prototypes
 void handleMode();
 void staticMode();
+void scheduledMode();
 void randomFadeMode();
 void fireFlickerMode();
 void neonFlickerEffect();
@@ -65,7 +66,7 @@ void DuringLongPress(void *oneButton)
 
 void DblClick(void* OneButton)
 {
-  mode =  static_cast<Mode>(((uint8_t)mode + 1) % 4); // Cycle through modes
+  mode =  static_cast<Mode>(((uint8_t)mode + 1) % 5); // Cycle through modes
   printMode();
   saveSettings();
 }
@@ -112,6 +113,9 @@ void handleMode() {
     case MODE_STATIC:
       staticMode();
       break;
+    case MODE_SCHEDULED:
+      scheduledMode();
+      break;
     case MODE_RANDOM_FADE:
       randomFadeMode();
       break;
@@ -125,7 +129,61 @@ void handleMode() {
 }
 
 void staticMode() {
-  analogWrite(LED_PIN, brightness); // Static brightness
+    analogWrite(LED_PIN, brightness); // Turn LED ON at the defined brightness
+}
+
+void scheduledMode() {
+  const unsigned long period = 60000; // Total period in milliseconds (5 minutes)
+
+  // Duty cycle variables
+  static unsigned long onTime = 0;           // LED ON time
+  static unsigned long offTime = 0;          // LED OFF time
+
+  // Timing variables
+  static unsigned long previousMillis = 0;   // Tracks the last timing event
+  static bool ledState = false;              // Tracks LED state (ON/OFF)
+
+   // Read ADC value and map it to duty cycle percentage (10% to 90%)
+  int adcValue = analogRead(ADC_PIN);
+  int dutyCycle = map(adcValue, 0, 1023, 5, 100);
+
+  // Calculate ON and OFF times based on the duty cycle
+  onTime = (period * dutyCycle) / 100;    // ON time in milliseconds
+  offTime = period - onTime;             // OFF time in milliseconds
+
+
+  // Get the current time
+  unsigned long currentMillis = millis();
+  unsigned long targetTime = dutyCycle*period/100;
+  Monitor.print(targetTime);
+  Monitor.print(" ");
+  if (!ledState)
+  {
+    Monitor.print(period-(currentMillis - previousMillis));
+    Monitor.print(" next is on. ");
+  }
+  if (ledState)
+  {
+    Monitor.print(period-(currentMillis - previousMillis));
+    Monitor.print(" next is off");
+  }
+  Monitor.println();
+
+  // Manage LED state based on timing and duty cycle
+  if (ledState && (currentMillis - previousMillis >= onTime)) 
+  {
+    // If LED is ON and the ON duration has elapsed, turn it OFF
+    ledState = false;
+    previousMillis = currentMillis;  // Reset timing
+    analogWrite(LED_PIN, 0);         // Turn LED OFF
+  } 
+  else if (!ledState && (currentMillis - previousMillis >= offTime)) 
+  {
+    // If LED is OFF and the OFF duration has elapsed, turn it ON
+    ledState = true;
+    previousMillis = currentMillis;  // Reset timing
+    analogWrite(LED_PIN, brightness); // Turn LED ON at the defined brightness
+  }
 }
 
 void randomFadeMode() {
@@ -316,6 +374,9 @@ void printMode() {
   switch (mode) {
     case MODE_STATIC:
       Monitor.println("Static");
+      break;
+    case MODE_SCHEDULED:
+      Monitor.println("Scheduled");
       break;
     case MODE_RANDOM_FADE:
       Monitor.println("Random Fade In/Out");
