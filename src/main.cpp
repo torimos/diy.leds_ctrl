@@ -5,11 +5,12 @@
 
 // Pin definitions
 #define BUTTON_PIN PB0
+#define ADC_PIN PB3
 #define LED_PIN PB1
 #define TX_PIN PB4
 
 // Modes
-enum Mode { MODE_STATIC, MODE_RANDOM_FADE, MODE_FIRE_FLICKER };
+enum Mode { MODE_STATIC, MODE_RANDOM_FADE, MODE_NEON_FLICKER, MODE_FIRE_FLICKER };
 enum BrightnessMode { BR_MODE_INC, BR_MODE_DEC };
 // Globals
 const int brAddress = 0;
@@ -29,6 +30,7 @@ void handleMode();
 void staticMode();
 void randomFadeMode();
 void fireFlickerMode();
+void neonFlickerEffect();
 void printMode();
 void printBrightness();
 void adjustBrightness();
@@ -63,8 +65,7 @@ void DuringLongPress(void *oneButton)
 
 void DblClick(void* OneButton)
 {
-  static unsigned long lastUpdate = 0; // Last update timestamp
-  mode =  static_cast<Mode>(((uint8_t)mode + 1) % 3); // Cycle through modes
+  mode =  static_cast<Mode>(((uint8_t)mode + 1) % 4); // Cycle through modes
   printMode();
   saveSettings();
 }
@@ -113,6 +114,9 @@ void handleMode() {
       break;
     case MODE_RANDOM_FADE:
       randomFadeMode();
+      break;
+    case MODE_NEON_FLICKER:
+      neonFlickerEffect();
       break;
     case MODE_FIRE_FLICKER:
       fireFlickerMode();
@@ -178,6 +182,108 @@ void fireFlickerMode() {
   }
 }
 
+void neonFlickerEffect2() {
+  static unsigned long lastUpdateTime = 0; // Track the last update time
+  static int currentBrightness = 0;       // Current brightness level
+  static bool isFlickering = true;        // Is the neon in flickering mode?
+  static unsigned long flickerDuration = 0; // Time the flicker should last
+  static unsigned long steadyStateTime = 0; // Time to maintain steady brightness
+
+  unsigned long currentTime = millis();
+
+  if (isFlickering) {
+    // Flickering Phase
+    if (currentTime - lastUpdateTime > random(50, 200)) { // Random short flicker intervals
+      lastUpdateTime = currentTime;
+
+      // Randomly turn LED off or set a brightness
+      if (random(0, 10) < 3) { // 30% chance to turn off completely
+        currentBrightness = 0;
+      } else {
+        currentBrightness = random(50, 255); // Random brightness for flicker
+      }
+      analogWrite(LED_PIN, currentBrightness);
+
+      // Randomly decide when to exit flickering mode
+      if (flickerDuration == 0) {
+        flickerDuration = currentTime + random(3000, 5000); // Flicker for 3-5 seconds
+      }
+      if (currentTime > flickerDuration) {
+        isFlickering = false; // End flickering mode
+        steadyStateTime = currentTime + random(10000, 20000); // Stay steady for 10-20 seconds
+        currentBrightness = 255; // Fully lit when steady
+        analogWrite(LED_PIN, currentBrightness);
+      }
+    }
+  } else {
+    // Steady State Phase
+    if (currentTime > steadyStateTime) {
+      isFlickering = true; // Return to flickering mode
+      flickerDuration = 0;
+    }
+  }
+}
+
+void neonFlickerEffect() {
+  static unsigned long lastUpdateTime = 0; // Last update time
+  static int currentBrightness = 0;       // Current brightness level
+  static int targetBrightness = 0;        // Target brightness
+  static unsigned long flickerDuration = 0; // Duration of the flicker phase
+  static bool isFlickering = true;        // Whether in flickering mode
+
+  unsigned long currentTime = millis();
+
+  // Define update interval (shorter for flickering, longer for fading)
+  const unsigned long flickerInterval = random(30, 80);  // Flicker interval
+  const unsigned long fadeInterval = 20;                 // Fade step interval
+
+  if (isFlickering) {
+    // Flickering Phase
+    if (currentTime - lastUpdateTime > flickerInterval) {
+      lastUpdateTime = currentTime;
+
+      // Smoothly transition to a random brightness (soft flicker)
+      targetBrightness = random(50, 200); // Random brightness for soft flicker
+      int step = (targetBrightness - currentBrightness) / 5; // Soft fade steps
+      currentBrightness += step;
+
+      // Ensure brightness stays within valid bounds
+      currentBrightness = constrain(currentBrightness, 0, 255);
+      analogWrite(LED_PIN, currentBrightness);
+
+      // Randomly decide when to exit flickering mode
+      if (flickerDuration == 0) {
+        flickerDuration = currentTime + random(4000, 7000); // Flicker for 4-7 seconds
+      }
+      if (currentTime > flickerDuration) {
+        isFlickering = false; // Exit flickering phase
+        currentBrightness = 255; // Full brightness for steady phase
+        analogWrite(LED_PIN, currentBrightness);
+      }
+    }
+  } else {
+    // Steady State Phase
+    if (currentTime - lastUpdateTime > fadeInterval) {
+      lastUpdateTime = currentTime;
+
+      // Gradually dim and brighten softly in steady state
+      targetBrightness = random(200, 255); // Target brightness in steady state
+      int step = (targetBrightness - currentBrightness) / 10; // Smooth fade step
+      currentBrightness += step;
+
+      // Ensure brightness stays within valid bounds
+      currentBrightness = constrain(currentBrightness, 0, 255);
+      analogWrite(LED_PIN, currentBrightness);
+
+      // Return to flickering mode after steady phase
+      if (random(0, 1000) < 10) { // Small chance to re-enter flicker mode
+        isFlickering = true;
+        flickerDuration = 0;
+      }
+    }
+  }
+}
+
 
 void adjustBrightness() {
   static unsigned long lastUpdate = 0; // Last update timestamp
@@ -216,6 +322,9 @@ void printMode() {
       break;
     case MODE_FIRE_FLICKER:
       Monitor.println("Fire Flicker");
+      break;
+    case MODE_NEON_FLICKER:
+      Monitor.println("Neon Flicker");
       break;
     default:
       Monitor.println("Unknown");
