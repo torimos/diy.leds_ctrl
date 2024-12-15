@@ -67,7 +67,13 @@ void updateMaxBrightness(){
   }
   // The median value
   adcValue = adcSamples[numADCSamples / 2];
-  maxBrightness = map(adcValue, 0, 1023, 5, 255);
+  int br = adcValue >> 2;
+  if (br < 5)
+    br = 5;
+  if (br > 253)
+    br = 255;
+  maxBrightness = br; // gammaCorrectionTable[(br >> 2)%255];
+  //maxBrightness = map(adcValue, 50, 1023-50, 5, 255);
 }
 
 void debug(){
@@ -113,25 +119,23 @@ void setup() {
 void loop() {
   updateMaxBrightness();
   debug();
-  analogWrite(LED_PIN, maxBrightness);
-  // bool buttonState = digitalRead(BUTTON_PIN);
+  //analogWrite(LED_PIN, maxBrightness);
+  bool buttonState = digitalRead(BUTTON_PIN);
 
-  // // Check for button release
-  // if (lastButtonState == LOW && buttonState == HIGH) {
-  //   // Switch mode on button release
-  //   currentMode = static_cast<Mode>((currentMode + 1) % 3); // Cycle through modes
-  //   debug();
-  //   saveSettings();
-  //   blinkLED(1+currentMode, 200);
-  //   delay(500);
-  // }
-  // lastButtonState = buttonState;
+  // Check for button release
+  if (lastButtonState == LOW && buttonState == HIGH) {
+    // Switch mode on button release
+    currentMode = static_cast<Mode>((currentMode + 1) % 3); // Cycle through modes
+    saveSettings();
+    blinkLED(1+currentMode, 200);
+    delay(500);
+  }
+  lastButtonState = buttonState;
 
-  // if (currentMode == STATIC) {
-  //   setMaxBrightness();
-  //   // Static mode: Set LED to maximum brightness
-  //   analogWrite(LED_PIN, maxBrightness);
-  // } 
+  if (currentMode == STATIC) {
+    // Static mode: Set LED to maximum brightness
+    analogWrite(LED_PIN, maxBrightness);
+  } 
   // else if (currentMode == FIRE) {
   //   // Fire animation: smooth flickering effect
   //   static int currentBrightness = maxBrightness / 2; // Start at mid brightness
