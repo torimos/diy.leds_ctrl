@@ -35,6 +35,7 @@ void neonFlickerEffect();
 void printMode();
 void printBrightness();
 void adjustBrightness();
+void blinkLED(int times, int delayTime);
 
 void saveSettings() {
   EEPROM.write(brAddress, (uint8_t)brightness);
@@ -69,6 +70,17 @@ void DblClick(void* OneButton)
   mode =  static_cast<Mode>(((uint8_t)mode + 1) % 5); // Cycle through modes
   printMode();
   saveSettings();
+  blinkLED(1+((int)mode), 250);
+  delay(500);
+}
+
+void blinkLED(int times, int delayTime) {
+  for (int i = 0; i < times; i++) {
+    analogWrite(LED_PIN, 16);
+    delay(delayTime);
+    analogWrite(LED_PIN, 0);
+    delay(delayTime);
+  }
 }
 
 void setup() {
@@ -98,9 +110,11 @@ void setup() {
   {
     brMode = BR_MODE_INC;
   }
-
   printMode();
   printBrightness();
+
+  blinkLED(1+((int)mode), 250);
+  delay(1000);
 }
 
 void loop() {
