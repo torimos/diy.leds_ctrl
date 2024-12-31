@@ -199,8 +199,8 @@ void adjustBrightness() {
   const int brStep = 2;
   const int brUpdateInterval = 30;
 
-  int adcValue = analogRead(ADC_PIN);
-  int maxBrightness = map(adcValue, 0, 1023, 0, 255);
+  //int adcValue = analogRead(ADC_PIN);
+  int maxBrightness = 128; //map(adcValue, 0, 1023, 0, 255);
   if ((millis()-lastUpdate)>brUpdateInterval)
   {
     lastUpdate = millis();
